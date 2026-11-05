@@ -21,9 +21,18 @@ Your app will be live at `https://team-update.vercel.app` (or your custom domain
 
 ## Usage
 
-- **Editor:** Open `https://your-domain.vercel.app?edit=1` to create/edit updates
+- **Editor:** Open `https://your-domain.vercel.app?edit=1` and enter the admin password to create/edit updates
 - **Viewer:** Open a shared link like `https://your-domain.vercel.app#u-xxx` for read-only presentation
 - **Publish:** Click "Publish" to save to Supabase; updates persist across reloads
+
+### Authentication
+
+Editor access is password-protected. Open `?edit=1` to unlock:
+
+- **Password:** `admin123` (change the `ADMIN_PASSWORD` constant in `index.html`)
+- Auth lasts for the browser session (sessionStorage)
+- Shared links (`#u-xxx`) always open in read-only presentation mode — viewers cannot edit or delete
+
 
 ## Tech
 
