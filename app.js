@@ -388,7 +388,28 @@ $("exit").onclick=()=>{document.body.classList.remove("present");try{document.fu
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.body.classList.remove("present")});
 window.addEventListener("hashchange",()=>{const h=hashId();if(h&&h!==cur&&items.find(x=>x.id===h))open(h)});
 
-// Initialize auth and load data
+// Theme toggle (persists in localStorage)
+const THEME_KEY = "team_updates_theme";
+let currentTheme = localStorage.getItem(THEME_KEY) || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem(THEME_KEY, theme);
+  const btn = $("theme-toggle");
+  if (btn) btn.textContent = theme === "dark" ? "☀️" : "🌙";
+  currentTheme = theme;
+}
+
+function toggleTheme() {
+  applyTheme(currentTheme === "dark" ? "light" : "dark");
+}
+
+// Initialize theme
+applyTheme(currentTheme);
+
+// Toggle button click
+$("theme-toggle").onclick = toggleTheme;
+
 (async () => {
   renderAuthForm();
   const { data: sessionData } = await sb.auth.getSession();
