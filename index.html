@@ -249,7 +249,7 @@ function renderAuthForm() {
   emailInput.focus();
 }
 
-// Handle sign in / sign up
+// Handle sign in only
 async function handleAuthSubmit() {
   const email = $("auth-email").value.trim();
   const password = $("auth-password").value.trim();
@@ -264,17 +264,8 @@ async function handleAuthSubmit() {
   }
   
   try {
-    if (authMode === 'signin') {
-      const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-    } else {
-      const { error } = await sb.auth.signUp({ email, password });
-      if (error) throw error;
-      err.textContent = "Account created. Please sign in.";
-      err.style.display = "block";
-      authMode = 'signin';
-      renderAuthForm();
-    }
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) throw error;
   } catch(e) {
     err.textContent = e.message || "Authentication failed.";
     err.style.display = "block";
