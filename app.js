@@ -2,6 +2,8 @@ const SRC="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
 const $=id=>document.getElementById(id);
 let cur = null, dirty = false;
 let items = [];
+let pastedImages = {}; // key -> dataUrl map for pasted screenshots
+let imageCounter = 0;
 
 async function loadItems() {
   try {
@@ -203,7 +205,7 @@ function normalize(raw){
   return fin.join("\n");
 }
 
-// Paste screenshot handler — converts clipboard image to base64 markdown
+// Paste screenshot handler — inserts short placeholder in editor, stores data URL for view mode
 async function pasteImage(e) {
   const items = e.clipboardData.items || [];
   for (const item of items) {
@@ -213,11 +215,14 @@ async function pasteImage(e) {
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result;
+        const key = "pasted-img-" + (++imageCounter);
+        pastedImages[key] = dataUrl;
+        savePastedImages();
         const textarea = $("src");
         const start = textarea.selectionStart;
         const end = textarea.selectionEnd;
         const value = textarea.value;
-        const imageMd = `\n![Screenshot](${dataUrl})\n`;
+        const imageMd = `\n![Screenshot](${key})\n`;
         textarea.value = value.slice(0, start) + imageMd + value.slice(end);
         textarea.selectionStart = textarea.selectionEnd = start + imageMd.length;
         textarea.focus();
@@ -229,9 +234,28 @@ async function pasteImage(e) {
   }
 }
 
+function savePastedImages() {
+  try { localStorage.setItem("team_updates_images", JSON.stringify(pastedImages)); } catch(_) {}
+}
+
+function loadPastedImages() {
+  try { pastedImages = JSON.parse(localStorage.getItem("team_updates_images") || "{}"); } catch(_) { pastedImages = {}; }
+  // Restore image counter
+  const keys = Object.keys(pastedImages);
+  if (keys.length) {
+    const max = Math.max(...keys.map(k => parseInt(k.replace("pasted-img-", "")) || 0));
+    imageCounter = max;
+  }
+}
+
 function render(raw){
   const html=DOMPurify.sanitize(marked.parse(normalize(raw),{breaks:true,gfm:true}));
   const box=document.createElement("div");box.innerHTML=html;
+  // Replace pasted image placeholder URLs with actual base64 data URLs
+  box.querySelectorAll("img").forEach(img=>{
+    const src=img.getAttribute("src");
+    if(src && pastedImages[src]) img.src = pastedImages[src];
+  });
   box.querySelectorAll("table").forEach(t=>{const w=document.createElement("div");w.className="tw";t.replaceWith(w);w.appendChild(t)});
   box.querySelectorAll("a").forEach(a=>{a.target="_blank";a.rel="noopener noreferrer"});
   // Add owner avatars before bold names
@@ -307,6 +331,7 @@ async function publish() {
     const { error } = await sb.from("updates").upsert(items);
     if (error) { console.error("Supabase upsert error:", error); throw error; }
     try { localStorage.setItem("team_updates", JSON.stringify(items)); } catch(_) {}
+    savePastedImages();
     setStatus("Saved to Supabase ✓");
     dirty = false;
     return true;
@@ -374,6 +399,7 @@ window.addEventListener("hashchange",()=>{const h=hashId();if(h&&h!==cur&&items.
   updateAuthUI();
   maybeAddLogoutBtn();
 
+  loadPastedImages();
   await loadItems();
 
   if (items.find(x => x.id === h0)) {
