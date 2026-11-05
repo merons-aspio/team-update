@@ -124,7 +124,6 @@ body.present #edit,body.present .viewonly,body.present .linkrow{display:none}
     <input type="password" id="auth-password" placeholder="Password">
     <div class="auth-error" id="auth-error"></div>
     <button id="auth-btn">Sign in</button>
-    <div class="toggle" id="auth-toggle">Don't have an account? <span id="auth-switch">Sign up</span></div>
   </div>
 </div>
 <button class="btn exit" id="exit">Exit presentation</button>
@@ -181,7 +180,6 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // Auth state
 let user = null;
 let canEdit = false;
-let authMode = 'signin'; // 'signin' | 'signup'
 
 // 1. Detect edit mode via ?edit=1 in the URL
 const hashId=()=>location.hash.slice(1);
@@ -232,35 +230,15 @@ function updateAuthUI() {
   }
 }
 
-// Render auth form (signin or signup)
+// Render auth form (signin only)
 function renderAuthForm() {
   const title = $("auth-title");
   const btn = $("auth-btn");
-  const toggle = $("auth-toggle");
-  const switchText = $("auth-switch");
   const emailInput = $("auth-email");
   const passInput = $("auth-password");
   
-  if (authMode === 'signin') {
-    title.textContent = "Sign in to edit";
-    btn.textContent = "Sign in";
-    toggle.innerHTML = "Don't have an account? <span id='auth-switch' style='color:var(--accent);cursor:pointer;text-decoration:none'>Sign up</span>";
-    switchText.style.cursor = "pointer";
-  } else {
-    title.textContent = "Create account";
-    btn.textContent = "Sign up";
-    toggle.innerHTML = "Already have an account? <span id='auth-switch' style='color:var(--accent);cursor:pointer;text-decoration:none'>Sign in</span>";
-    switchText.style.cursor = "pointer";
-  }
-  
-  // Re-wire switch click
-  const switchEl = $("auth-switch");
-  switchEl.onclick = () => {
-    authMode = authMode === 'signin' ? 'signup' : 'signin';
-    $("auth-error").textContent = "";
-    $("auth-error").style.display = "none";
-    renderAuthForm();
-  };
+  title.textContent = "Sign in to edit";
+  btn.textContent = "Sign in";
   
   // Re-wire submit
   btn.onclick = handleAuthSubmit;
@@ -314,6 +292,13 @@ async function handleLogout() {
 
 // Login button click
 $("auth-login-btn").onclick = () => {
+  if (!isEditor) {
+    // Redirect to ?edit=1 so login leads to editor mode
+    const sep = location.search ? "&" : "?";
+    history.replaceState(null, "", location.pathname + location.search + sep + "edit=1");
+    location.reload();
+    return;
+  }
   $("auth-overlay").classList.add("open");
   renderAuthForm();
 };
