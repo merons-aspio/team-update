@@ -52,9 +52,10 @@ textarea:focus,.meta *:focus{outline:2px solid var(--accent);outline-offset:1px}
 .sec h3:first-of-type{margin-top:0}
 .doc h4{margin:16px 0 6px;font-size:15px;font-weight:600}
 .doc ul{list-style:none;padding:0;margin:0 0 6px}
-.doc li{position:relative;padding:7px 0 7px 24px;border-bottom:1px dashed var(--line)}
+.doc li{position:relative;padding:7px 0 7px 24px;border-bottom:1px dashed var(--line);overflow:hidden}
 .doc li:last-child{border-bottom:0}
 .doc li::before{content:"";position:absolute;left:6px;top:.9em;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.status-chip{float:right;font-size:11px;margin-top:1px}
 .doc li strong{color:var(--ink)}
 .doc p{margin:0 0 10px}
 .doc a{color:var(--accent);text-underline-offset:3px}

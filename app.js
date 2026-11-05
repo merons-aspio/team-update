@@ -168,38 +168,6 @@ function statusChip(line) {
   return "";
 }
 
-// Compute summary stats from items
-function computeStats(raws) {
-  let done = 0, prog = 0, blocked = 0;
-  const owners = new Set();
-  for (const raw of raws) {
-    const lines = raw.split("\n");
-    for (const line of lines) {
-      const t = line.toLowerCase();
-      if (/blocked/.test(t)) blocked++;
-      else if (/done|completed/.test(t)) done++;
-      else if (/in progress/.test(t)) prog++;
-    }
-    for (const name of Object.keys(OWNERS)) {
-      if (new RegExp(`\\b${name}\\b`, "i").test(raw)) owners.add(name);
-    }
-  }
-  return { done, prog, blocked, owners: owners.size };
-}
-
-function renderSummary(raws) {
-  const s = computeStats(raws);
-  const el = $("summary");
-  if (!raws.length || raws.every(r => !r.trim())) { el.style.display = "none"; return; }
-  el.style.display = "grid";
-  el.innerHTML = `
-    <div class="stat"><div class="big">${s.done}</div><div class="label">Completed</div></div>
-    <div class="stat"><div class="big">${s.prog}</div><div class="label">In Progress</div></div>
-    <div class="stat"><div class="big">${s.blocked}</div><div class="label">Blocked</div></div>
-    <div class="stat"><div class="big">${s.owners}</div><div class="label">Owners</div></div>
-  `;
-}
-
 function buildHtml(){
   const json=JSON.stringify({updates:items}).replace(/</g,"\\u003c");
   return SRC.replace(/(<script type="application\/json" id="data">)[\s\S]*?(<\/script>)/,(m,a,b)=>a+json+b)
@@ -234,12 +202,39 @@ function normalize(raw){
     fin.push(l)});
   return fin.join("\n");
 }
+
+// Paste screenshot handler — converts clipboard image to base64 markdown
+async function pasteImage(e) {
+  const items = e.clipboardData.items || [];
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        const textarea = $("src");
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const value = textarea.value;
+        const imageMd = `\n![Screenshot](${dataUrl})\n`;
+        textarea.value = value.slice(0, start) + imageMd + value.slice(end);
+        textarea.selectionStart = textarea.selectionEnd = start + imageMd.length;
+        textarea.focus();
+        queueSave();
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+  }
+}
+
 function render(raw){
   const html=DOMPurify.sanitize(marked.parse(normalize(raw),{breaks:true,gfm:true}));
   const box=document.createElement("div");box.innerHTML=html;
   box.querySelectorAll("table").forEach(t=>{const w=document.createElement("div");w.className="tw";t.replaceWith(w);w.appendChild(t)});
   box.querySelectorAll("a").forEach(a=>{a.target="_blank";a.rel="noopener noreferrer"});
-  // Add owner avatars before bold names and status chips before bullets
+  // Add owner avatars before bold names
   box.querySelectorAll("strong").forEach(s=>{
     const text=s.textContent;
     const owners=detectOwners(text);
@@ -293,7 +288,7 @@ function open(id){
   cur=id||null;const it=items.find(x=>x.id===id);
   $("src").value=it?it.raw||"":"";$("type").value=it?it.type||"Weekly":"Weekly";$("title").value=it?it.custom||"":"";
   document.body.classList.toggle("hasid",!!it);
-  $("linkrow").hidden=true;paint();renderList();renderSummary(it?[it.raw]||[]:[])
+  $("linkrow").hidden=true;paint();renderList()
 }
 function touch(){
   const raw=$("src").value;if(!raw.trim())return false;
@@ -387,6 +382,9 @@ window.addEventListener("hashchange",()=>{const h=hashId();if(h&&h!==cur&&items.
   } else {
     open(items[0] ? items[0].id : null);
   }
+
+  // Paste screenshot into editor
+  $("src").addEventListener("paste", pasteImage);
 
   setStatus("Ready");
   paint();
