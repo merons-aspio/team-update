@@ -99,9 +99,26 @@ body.present .split{grid-template-columns:1fr}
 body.present #edit,body.present .viewonly,body.present .linkrow{display:none}
 @media(max-width:1100px){.split{grid-template-columns:1fr}.split textarea{min-height:40vh}}
 @media print{.viewonly{display:none!important}}
+/* Admin password prompt */
+#auth-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;backdrop-filter:blur(4px)}
+#auth-overlay.open{display:flex;align-items:center;justify-content:center}
+#auth-box{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:32px 28px;max-width:360px;width:90%;text-align:center;box-shadow:var(--shadow)}
+#auth-box h2{margin:0 0 16px;font-size:20px}
+#auth-box input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;margin-bottom:16px;font-size:15px;box-sizing:border-box}
+#auth-box .auth-error{color:var(--warn);font-size:13px;margin-bottom:14px;display:none}
+#auth-box button{width:100%;padding:12px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:15px}
+#auth-box button:hover{opacity:.9}
 </style>
 </head>
 <body>
+<div id="auth-overlay">
+  <div id="auth-box">
+    <h2>Admin Password</h2>
+    <input type="password" id="auth-input" placeholder="Enter password">
+    <div class="auth-error" id="auth-error">Incorrect password</div>
+    <button id="auth-btn">Unlock Editor</button>
+  </div>
+</div>
 <button class="btn exit" id="exit">Exit presentation</button>
 <div class="app">
 <aside>
@@ -135,7 +152,7 @@ body.present #edit,body.present .viewonly,body.present .linkrow{display:none}
 <script>
 const SRC="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
 const $=id=>document.getElementById(id);
-let canEdit = true, cur = null, dirty = false;
+let cur = null, dirty = false;
 let items = [];
 
 async function loadItems() {
@@ -152,12 +169,59 @@ const SUPABASE_URL = "https://ozbnducbpvbdewyerbkn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_43wD1ERo2QA8csAh0vsQkg_hQecLWMZ";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// 2. Simple admin password for editor access (change this!)
+const ADMIN_PASSWORD = "admin123";
+
 // 1. Detect edit mode via ?edit=1 in the URL
 const hashId=()=>location.hash.slice(1);
 const setStatus=t=>{$("status").textContent=t};
 
 const isEditor = new URLSearchParams(location.search).has('edit');
 const h0 = hashId();
+
+// 3. Check admin authentication (session-based)
+const isAuthenticated = sessionStorage.getItem("team_updates_admin") === "1";
+
+if (isEditor && !isAuthenticated) {
+  // Show password prompt, block editor access until unlocked
+  document.body.classList.remove("editor");
+  document.body.classList.add("viewer");
+  $("exit").style.display = "none";
+  const overlay = $("auth-overlay");
+  overlay.classList.add("open");
+  const input = $("auth-input");
+  const btn = $("auth-btn");
+  const err = $("auth-error");
+  const tryUnlock = () => {
+    if (input.value === ADMIN_PASSWORD) {
+      sessionStorage.setItem("team_updates_admin", "1");
+      overlay.classList.remove("open");
+      location.search = ""; // remove ?edit=1, reload clean
+      location.reload();
+    } else {
+      err.style.display = "block";
+      input.value = "";
+      input.focus();
+    }
+  };
+  btn.onclick = tryUnlock;
+  input.addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
+  input.focus();
+  // Don't proceed further; wait for auth
+} else {
+  // Set UI mode: editor only if authenticated; otherwise viewer
+  if (isAuthenticated) {
+    document.body.classList.remove("viewer");
+    document.body.classList.add("editor");
+  } else {
+    document.body.classList.remove("editor");
+    document.body.classList.add("viewer");
+    $("exit").style.display = "none";
+  }
+}
+// Admin can edit only if authenticated
+let canEdit = isAuthenticated;
+
 function buildHtml(){
   const json=JSON.stringify({updates:items}).replace(/</g,"\\u003c");
   return SRC.replace(/(<script type="application\/json" id="data">)[\s\S]*?(<\/script>)/,(m,a,b)=>a+json+b)
@@ -265,7 +329,7 @@ async function publish() {
 ["src","title"].forEach(i=>$(i).addEventListener("input",queueSave));
 $("type").addEventListener("change",queueSave);
 $("pub").onclick=publish;
-$("new").onclick=()=>{history.replaceState(null,"",location.pathname+location.search);open(null);document.body.classList.remove("hasid");$("src").focus()};
+$("new").onclick=()=>{if(!canEdit)return;history.replaceState(null,"",location.pathname+location.search);open(null);document.body.classList.remove("hasid");$("src").focus()};
 $("copy").onclick = async () => {
   if (!$("src").value.trim()) return;
   if (!cur) touch();
@@ -285,7 +349,7 @@ $("copy").onclick = async () => {
 };
 let armed = false;
 $("del").onclick = async () => {
-  if (!cur) return;
+  if (!cur || !canEdit) return;
   if (!armed) {
     armed = true;
     $("del").textContent = "Click again to delete";
@@ -309,24 +373,14 @@ $("present").onclick=pres;$("present2").onclick=pres;
 $("exit").onclick=()=>{document.body.classList.remove("present");try{document.fullscreenElement&&document.exitFullscreen()}catch(e){}};
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.body.classList.remove("present")});
 window.addEventListener("hashchange",()=>{const h=hashId();if(h&&h!==cur&&items.find(x=>x.id===h))open(h)});
-// Set UI mode: editor by default unless viewer opened a shared link with a hash
-if (isEditor || !h0) {
-  document.body.classList.remove("viewer");
-  document.body.classList.add("editor");
-} else {
-  document.body.classList.remove("editor");
-  document.body.classList.add("viewer");
-  // Hide exit button for viewers — they can just close the tab
-  $("exit").style.display = "none";
-}
 
 // Check for hash link on initial page load
 (async () => {
   await loadItems();
   if (items.find(x => x.id === h0)) {
     open(h0);
-    // Auto-enter presentation mode only for viewers opening a shared link
-    if (!isEditor && h0) pres();
+    // Auto-enter presentation mode only for unauthenticated viewers opening a shared link
+    if (!isAuthenticated && h0) pres();
   } else {
     open(items[0] ? items[0].id : null);
   }
