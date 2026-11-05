@@ -43,7 +43,6 @@ function updateAuthUI() {
   const loginBtn = $("auth-login-btn");
   
   if (user) {
-    // Logged in — hide auth overlay, hide login button, enable editor if ?edit=1
     overlay.classList.remove("open");
     loginBtn.style.display = "none";
     if (isEditor) {
@@ -55,7 +54,6 @@ function updateAuthUI() {
       $("exit").style.display = "none";
     }
   } else {
-    // Not logged in — show login button, show auth overlay if ?edit=1
     loginBtn.style.display = "inline-block";
     if (isEditor) {
       overlay.classList.add("open");
@@ -80,7 +78,6 @@ function renderAuthForm() {
   title.textContent = "Sign in to edit";
   btn.textContent = "Sign in";
   
-  // Re-wire submit
   btn.onclick = handleAuthSubmit;
   [emailInput, passInput].forEach(inp => {
     inp.onkeydown = (e) => { if (e.key === "Enter") handleAuthSubmit(); };
@@ -124,7 +121,6 @@ async function handleLogout() {
 // Login button click
 $("auth-login-btn").onclick = () => {
   if (!isEditor) {
-    // Redirect to ?edit=1 so login leads to editor mode
     const sep = location.search ? "&" : "?";
     history.replaceState(null, "", location.pathname + location.search + sep + "edit=1");
     location.reload();
@@ -138,15 +134,70 @@ $("auth-login-btn").onclick = () => {
 function maybeAddLogoutBtn() {
   if ($("auth-logout")) return;
   if (!user) return;
-  const sp = $("bar-sp") || null;
   const btn = document.createElement("button");
   btn.id = "auth-logout";
   btn.className = "btn";
   btn.textContent = "Logout (" + (user.email || "user") + ")";
   btn.onclick = handleLogout;
-  // Insert before the Present button
   const presentBtn = $("present");
   presentBtn.parentNode.insertBefore(btn, presentBtn);
+}
+
+// Owner detection for avatars
+const OWNERS = { Kidane: "K", Lidetu: "L", Wubshet: "W" };
+function detectOwners(raw) {
+  const found = [];
+  for (const [name, initial] of Object.entries(OWNERS)) {
+    if (new RegExp(`\\b${name}\\b`, "i").test(raw)) found.push({ name, initial });
+  }
+  return found;
+}
+
+function ownerHTML(owners) {
+  if (!owners.length) return "";
+  return owners.map(o => `<span class="owner ${o.name}"><span class="avatar">${o.initial}</span>${o.name}</span>`).join("");
+}
+
+// Status chip from a bullet line
+function statusChip(line) {
+  const t = line.toLowerCase();
+  if (/blocked/.test(t)) return `<span class="tag Blocked">Blocked</span>`;
+  if (/done|completed/.test(t)) return `<span class="tag">Done</span>`;
+  if (/in progress/.test(t)) return `<span class="tag" style="background:var(--warn-soft);color:var(--warn)">In Progress</span>`;
+  if (/planned|next|upcoming/.test(t)) return `<span class="tag" style="background:var(--accent-soft);color:var(--accent)">Planned</span>`;
+  return "";
+}
+
+// Compute summary stats from items
+function computeStats(raws) {
+  let done = 0, prog = 0, blocked = 0;
+  const owners = new Set();
+  for (const raw of raws) {
+    const lines = raw.split("\n");
+    for (const line of lines) {
+      const t = line.toLowerCase();
+      if (/blocked/.test(t)) blocked++;
+      else if (/done|completed/.test(t)) done++;
+      else if (/in progress/.test(t)) prog++;
+    }
+    for (const name of Object.keys(OWNERS)) {
+      if (new RegExp(`\\b${name}\\b`, "i").test(raw)) owners.add(name);
+    }
+  }
+  return { done, prog, blocked, owners: owners.size };
+}
+
+function renderSummary(raws) {
+  const s = computeStats(raws);
+  const el = $("summary");
+  if (!raws.length || raws.every(r => !r.trim())) { el.style.display = "none"; return; }
+  el.style.display = "grid";
+  el.innerHTML = `
+    <div class="stat"><div class="big">${s.done}</div><div class="label">Completed</div></div>
+    <div class="stat"><div class="big">${s.prog}</div><div class="label">In Progress</div></div>
+    <div class="stat"><div class="big">${s.blocked}</div><div class="label">Blocked</div></div>
+    <div class="stat"><div class="big">${s.owners}</div><div class="label">Owners</div></div>
+  `;
 }
 
 function buildHtml(){
@@ -175,7 +226,6 @@ function normalize(raw){
     if(t.startsWith("✅")&&t.length<90&&isBul(n)){out.push("### "+t.replace(/^✅\s*/,"✅ ").replace("✅ ",""));continue}
     out.push(t)
   }
-  // blank lines around lists/headings so markdown behaves
   const fin=[];
   out.forEach((l,i)=>{const p=fin[fin.length-1]??"";
     if(/^#{1,3} /.test(l)&&p!=="")fin.push("");
@@ -189,6 +239,23 @@ function render(raw){
   const box=document.createElement("div");box.innerHTML=html;
   box.querySelectorAll("table").forEach(t=>{const w=document.createElement("div");w.className="tw";t.replaceWith(w);w.appendChild(t)});
   box.querySelectorAll("a").forEach(a=>{a.target="_blank";a.rel="noopener noreferrer"});
+  // Add owner avatars before bold names and status chips before bullets
+  box.querySelectorAll("strong").forEach(s=>{
+    const text=s.textContent;
+    const owners=detectOwners(text);
+    if(owners.length){
+      const wrap=document.createElement("span");wrap.className="owner-prefix";
+      wrap.innerHTML=ownerHTML(owners)+" ";
+      s.parentNode.insertBefore(wrap,s);
+    }
+  });
+  box.querySelectorAll("li").forEach(li=>{
+    const chip=statusChip(li.textContent);
+    if(chip){
+      const c=document.createElement("span");c.className="status-chip";c.innerHTML=chip;c.style.float="right";c.style.fontSize="11px";
+      li.prepend(c);li.style.overflow="hidden";
+    }
+  });
   const frag=document.createElement("div");let sec=null;
   [...box.childNodes].forEach(n=>{
     if(n.nodeType===1&&n.tagName==="H1"){frag.appendChild(n);
@@ -226,7 +293,7 @@ function open(id){
   cur=id||null;const it=items.find(x=>x.id===id);
   $("src").value=it?it.raw||"":"";$("type").value=it?it.type||"Weekly":"Weekly";$("title").value=it?it.custom||"":"";
   document.body.classList.toggle("hasid",!!it);
-  $("linkrow").hidden=true;paint();renderList()
+  $("linkrow").hidden=true;paint();renderList();renderSummary(it?[it.raw]||[]:[])
 }
 function touch(){
   const raw=$("src").value;if(!raw.trim())return false;
@@ -314,10 +381,8 @@ window.addEventListener("hashchange",()=>{const h=hashId();if(h&&h!==cur&&items.
 
   await loadItems();
 
-  // Check for hash link on initial page load
   if (items.find(x => x.id === h0)) {
     open(h0);
-    // Auto-enter presentation mode only if not logged in and opening a shared link
     if (!user && h0) pres();
   } else {
     open(items[0] ? items[0].id : null);
