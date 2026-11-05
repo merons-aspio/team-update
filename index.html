@@ -99,24 +99,32 @@ body.present .split{grid-template-columns:1fr}
 body.present #edit,body.present .viewonly,body.present .linkrow{display:none}
 @media(max-width:1100px){.split{grid-template-columns:1fr}.split textarea{min-height:40vh}}
 @media print{.viewonly{display:none!important}}
-/* Admin password prompt */
+/* Auth overlay (login/signup) */
 #auth-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;backdrop-filter:blur(4px)}
 #auth-overlay.open{display:flex;align-items:center;justify-content:center}
 #auth-box{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:32px 28px;max-width:360px;width:90%;text-align:center;box-shadow:var(--shadow)}
-#auth-box h2{margin:0 0 16px;font-size:20px}
-#auth-box input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;margin-bottom:16px;font-size:15px;box-sizing:border-box}
-#auth-box .auth-error{color:var(--warn);font-size:13px;margin-bottom:14px;display:none}
-#auth-box button{width:100%;padding:12px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:15px}
+#auth-box h2{margin:0 0 20px;font-size:20px}
+#auth-box input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;font-size:15px;box-sizing:border-box}
+#auth-box .auth-error{color:var(--warn);font-size:13px;margin-bottom:14px;display:none;text-align:left}
+#auth-box button{width:100%;padding:12px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:15px;margin-bottom:10px}
 #auth-box button:hover{opacity:.9}
+#auth-box .toggle{margin-top:12px;font-size:13px;color:var(--muted)}
+#auth-box .toggle a{color:var(--accent);cursor:pointer;text-decoration:none}
+#auth-box .toggle a:hover{text-decoration:underline}
+#auth-user{font-size:13px;color:var(--muted);margin-left:8px}
+#auth-user .btn-logout{background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit;text-decoration:underline}
+#auth-user .btn-logout:hover{opacity:.8}
 </style>
 </head>
 <body>
 <div id="auth-overlay">
   <div id="auth-box">
-    <h2>Admin Password</h2>
-    <input type="password" id="auth-input" placeholder="Enter password">
-    <div class="auth-error" id="auth-error">Incorrect password</div>
-    <button id="auth-btn">Unlock Editor</button>
+    <h2 id="auth-title">Sign in to edit</h2>
+    <input type="email" id="auth-email" placeholder="Email">
+    <input type="password" id="auth-password" placeholder="Password">
+    <div class="auth-error" id="auth-error"></div>
+    <button id="auth-btn">Sign in</button>
+    <div class="toggle" id="auth-toggle">Don't have an account? <span id="auth-switch">Sign up</span></div>
   </div>
 </div>
 <button class="btn exit" id="exit">Exit presentation</button>
@@ -130,7 +138,7 @@ body.present #edit,body.present .viewonly,body.present .linkrow{display:none}
   <div class="bar ed">
     <select id="type" class="sel"><option>Weekly</option><option>Daily</option></select>
     <input id="title" class="ttl" placeholder="Title (optional)">
-    <span class="sp"></span>
+    <span id="bar-sp" class="sp"></span>
     <span class="status" id="status"></span>
     <button class="btn" id="del">Delete</button>
     <button class="btn" id="present">Present</button>
@@ -169,8 +177,10 @@ const SUPABASE_URL = "https://ozbnducbpvbdewyerbkn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_43wD1ERo2QA8csAh0vsQkg_hQecLWMZ";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// 2. Simple admin password for editor access (change this!)
-const ADMIN_PASSWORD = "admin123";
+// Auth state
+let user = null;
+let canEdit = false;
+let authMode = 'signin'; // 'signin' | 'signup'
 
 // 1. Detect edit mode via ?edit=1 in the URL
 const hashId=()=>location.hash.slice(1);
@@ -179,48 +189,139 @@ const setStatus=t=>{$("status").textContent=t};
 const isEditor = new URLSearchParams(location.search).has('edit');
 const h0 = hashId();
 
-// 3. Check admin authentication (session-based)
-const isAuthenticated = sessionStorage.getItem("team_updates_admin") === "1";
+// 2. Listen to Supabase Auth state changes
+sb.auth.onAuthStateChange((event, session) => {
+  user = session?.user ?? null;
+  canEdit = !!user;
+  updateAuthUI();
+  maybeAddLogoutBtn();
+});
 
-if (isEditor && !isAuthenticated) {
-  // Show password prompt, block editor access until unlocked
-  document.body.classList.remove("editor");
-  document.body.classList.add("viewer");
-  $("exit").style.display = "none";
+// Update auth UI based on login state
+function updateAuthUI() {
   const overlay = $("auth-overlay");
-  overlay.classList.add("open");
-  const input = $("auth-input");
-  const btn = $("auth-btn");
-  const err = $("auth-error");
-  const tryUnlock = () => {
-    if (input.value === ADMIN_PASSWORD) {
-      sessionStorage.setItem("team_updates_admin", "1");
-      overlay.classList.remove("open");
-      location.search = ""; // remove ?edit=1, reload clean
-      location.reload();
+  const editorEl = document.body;
+  
+  if (user) {
+    // Logged in — hide auth overlay, enable editor if ?edit=1
+    overlay.classList.remove("open");
+    if (isEditor) {
+      editorEl.classList.remove("viewer");
+      editorEl.classList.add("editor");
     } else {
-      err.style.display = "block";
-      input.value = "";
-      input.focus();
+      editorEl.classList.remove("editor");
+      editorEl.classList.add("viewer");
+      $("exit").style.display = "none";
     }
-  };
-  btn.onclick = tryUnlock;
-  input.addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
-  input.focus();
-  // Don't proceed further; wait for auth
-} else {
-  // Set UI mode: editor only if authenticated; otherwise viewer
-  if (isAuthenticated) {
-    document.body.classList.remove("viewer");
-    document.body.classList.add("editor");
   } else {
-    document.body.classList.remove("editor");
-    document.body.classList.add("viewer");
-    $("exit").style.display = "none";
+    // Not logged in — show auth overlay if ?edit=1, otherwise viewer mode
+    if (isEditor) {
+      overlay.classList.add("open");
+      editorEl.classList.remove("editor");
+      editorEl.classList.add("viewer");
+      $("exit").style.display = "none";
+    } else {
+      editorEl.classList.remove("editor");
+      editorEl.classList.add("viewer");
+      $("exit").style.display = "none";
+    }
   }
 }
-// Admin can edit only if authenticated
-let canEdit = isAuthenticated;
+
+// Render auth form (signin or signup)
+function renderAuthForm() {
+  const title = $("auth-title");
+  const btn = $("auth-btn");
+  const toggle = $("auth-toggle");
+  const switchText = $("auth-switch");
+  const emailInput = $("auth-email");
+  const passInput = $("auth-password");
+  
+  if (authMode === 'signin') {
+    title.textContent = "Sign in to edit";
+    btn.textContent = "Sign in";
+    toggle.innerHTML = "Don't have an account? <span id='auth-switch' style='color:var(--accent);cursor:pointer;text-decoration:none'>Sign up</span>";
+    switchText.style.cursor = "pointer";
+  } else {
+    title.textContent = "Create account";
+    btn.textContent = "Sign up";
+    toggle.innerHTML = "Already have an account? <span id='auth-switch' style='color:var(--accent);cursor:pointer;text-decoration:none'>Sign in</span>";
+    switchText.style.cursor = "pointer";
+  }
+  
+  // Re-wire switch click
+  const switchEl = $("auth-switch");
+  switchEl.onclick = () => {
+    authMode = authMode === 'signin' ? 'signup' : 'signin';
+    $("auth-error").textContent = "";
+    $("auth-error").style.display = "none";
+    renderAuthForm();
+  };
+  
+  // Re-wire submit
+  btn.onclick = handleAuthSubmit;
+  [emailInput, passInput].forEach(inp => {
+    inp.onkeydown = (e) => { if (e.key === "Enter") handleAuthSubmit(); };
+  });
+  
+  emailInput.focus();
+}
+
+// Handle sign in / sign up
+async function handleAuthSubmit() {
+  const email = $("auth-email").value.trim();
+  const password = $("auth-password").value.trim();
+  const err = $("auth-error");
+  err.textContent = "";
+  err.style.display = "none";
+  
+  if (!email || !password) {
+    err.textContent = "Please enter both email and password.";
+    err.style.display = "block";
+    return;
+  }
+  
+  try {
+    if (authMode === 'signin') {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    } else {
+      const { error } = await sb.auth.signUp({ email, password });
+      if (error) throw error;
+      err.textContent = "Account created. Please sign in.";
+      err.style.display = "block";
+      authMode = 'signin';
+      renderAuthForm();
+    }
+  } catch(e) {
+    err.textContent = e.message || "Authentication failed.";
+    err.style.display = "block";
+  }
+}
+
+// Logout
+async function handleLogout() {
+  await sb.auth.signOut();
+  user = null;
+  canEdit = false;
+  updateAuthUI();
+  location.reload();
+}
+
+// Add logout button to editor bar when logged in
+function maybeAddLogoutBtn() {
+  if ($("auth-logout")) return;
+  if (!user) return;
+  const sp = $("bar-sp") || null;
+  const btn = document.createElement("button");
+  btn.id = "auth-logout";
+  btn.className = "btn";
+  btn.textContent = "Logout (" + (user.email || "user") + ")";
+  btn.onclick = handleLogout;
+  // Insert before the Present button
+  const presentBtn = $("present");
+  presentBtn.parentNode.insertBefore(btn, presentBtn);
+}
 
 function buildHtml(){
   const json=JSON.stringify({updates:items}).replace(/</g,"\\u003c");
@@ -374,13 +475,24 @@ $("exit").onclick=()=>{document.body.classList.remove("present");try{document.fu
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.body.classList.remove("present")});
 window.addEventListener("hashchange",()=>{const h=hashId();if(h&&h!==cur&&items.find(x=>x.id===h))open(h)});
 
-// Check for hash link on initial page load
+// Initialize auth and load data
 (async () => {
+  renderAuthForm();
+  const { data: sessionData } = await sb.auth.getSession();
+  if (sessionData.session) {
+    user = sessionData.session.user;
+    canEdit = !!user;
+  }
+  updateAuthUI();
+  maybeAddLogoutBtn();
+
   await loadItems();
+
+  // Check for hash link on initial page load
   if (items.find(x => x.id === h0)) {
     open(h0);
-    // Auto-enter presentation mode only for unauthenticated viewers opening a shared link
-    if (!isAuthenticated && h0) pres();
+    // Auto-enter presentation mode only if not logged in and opening a shared link
+    if (!user && h0) pres();
   } else {
     open(items[0] ? items[0].id : null);
   }
