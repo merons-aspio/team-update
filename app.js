@@ -46,17 +46,21 @@ function updateAuthUI() {
   
   if (user) {
     overlay.classList.remove("open");
-    loginBtn.style.display = "none";
     if (isEditor) {
+      loginBtn.style.display = "none";
       editorEl.classList.remove("viewer");
       editorEl.classList.add("editor");
     } else {
+      // Logged in but viewing: show an "Edit" button to switch into editor mode
+      loginBtn.style.display = "inline-block";
+      loginBtn.textContent = "Edit";
       editorEl.classList.remove("editor");
       editorEl.classList.add("viewer");
       $("exit").style.display = "none";
     }
   } else {
     loginBtn.style.display = "inline-block";
+    loginBtn.textContent = "Login";
     if (isEditor) {
       overlay.classList.add("open");
       editorEl.classList.remove("editor");
