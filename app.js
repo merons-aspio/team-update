@@ -418,7 +418,9 @@ function queueSave(){if(canEdit)touch();paint()}
 async function publish() {
   if (!canEdit) return false;
   if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
-  if ($("src").value.trim()) touch();
+  // Only touch when an item is selected; touch() would otherwise create a new
+  // record from leftover textarea content (e.g. right after a delete).
+  if (cur && $("src").value.trim()) touch();
   
   try {
     const { error } = await sb.from("updates").upsert(items);
@@ -465,15 +467,24 @@ $("del").onclick = async () => {
   }
   armed = false;
   $("del").textContent = "Delete";
-  
-  try { await sb.from("updates").delete().eq("id", cur); } catch(e) { console.error("Supabase delete error:", e); }
-  
-  items = items.filter(x => x.id !== cur);
+
+  const targetId = cur;
+  try {
+    const { error } = await sb.from("updates").delete().eq("id", targetId);
+    if (error) throw error;
+  } catch(e) {
+    console.error("Supabase delete error:", e);
+    setStatus("Delete failed");
+    return;
+  }
+
+  items = items.filter(x => x.id !== targetId);
+  try { localStorage.setItem("team_updates", JSON.stringify(items)); } catch(_) {}
   cur = null;
-  dirty = true;
+  dirty = false;
   history.replaceState(null, "", location.pathname + location.search);
-  await publish();
   open(null);
+  setStatus("Deleted");
 };
 const pres=()=>{document.body.classList.add("present");try{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()}catch(e){}};
 $("present").onclick=pres;$("present2").onclick=pres;
