@@ -124,6 +124,38 @@ async function handleLogout() {
   location.reload();
 }
 
+// Toggle a checklist item directly in view mode (logged-in users only) and auto-save
+function handleViewClick(e) {
+  if (!user) return;
+  const cb = e.target.closest("input[type=checkbox]");
+  if (!cb) return;
+  e.preventDefault();
+  const all = $("view").querySelectorAll("input[type=checkbox]");
+  const idx = Array.from(all).indexOf(cb);
+  if (idx < 0) return;
+  const src = $("src");
+  const lines = src.value.split("\n");
+  const taskRe = /^\s*[-*+]\s+\[[ xX]?\]\s/;
+  let found = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (taskRe.test(lines[i])) {
+      if (found === idx) {
+        lines[i] = lines[i].replace(/\[xX\]/i, "[ ]").replace(/\[\s*\]/i, "[x]");
+        break;
+      }
+      found++;
+    }
+  }
+  src.value = lines.join("\n");
+  if (cur) {
+    const it = items.find(x => x.id === cur);
+    if (it) it.raw = src.value;
+  }
+  touch();
+  publish();
+  paint();
+}
+
 // Login button click
 $("auth-login-btn").onclick = () => {
   if (!isEditor) {
@@ -279,6 +311,9 @@ function render(raw){
       li.prepend(c);li.style.overflow="hidden";
     }
   });
+  // Checklist interactivity: logged-in users can toggle checkboxes in view mode
+  const boxes=box.querySelectorAll("input[type=checkbox]");
+  boxes.forEach(cb=>{cb.disabled=!user;});
   const frag=document.createElement("div");let sec=null;
   [...box.childNodes].forEach(n=>{
     if(n.nodeType===1&&n.tagName==="H1"){frag.appendChild(n);
@@ -296,11 +331,28 @@ function render(raw){
   return frag.innerHTML;
 }
 function titleOf(raw){const f=raw.split("\n").find(l=>l.trim())||"Untitled";return f.replace(/^#+\s*/,"").slice(0,70)}
+
+// Checklist stats: count total and checked tasklist items in raw markdown
+function checklistStats(raw){
+  const lines=(raw||"").split("\n");
+  let total=0,done=0;
+  const taskRe=/^\s*[-*+]\s+\[[ xX]?\]\s/;
+  const doneRe=/\[xX\]/;
+  for(const line of lines){
+    if(taskRe.test(line)){
+      total++;
+      if(doneRe.test(line)) done++;
+    }
+  }
+  return {total,done};
+}
 function paint(){
   const v=$("src").value.trim(),it=items.find(x=>x.id===cur);
   const d=it&&it.at?new Date(it.at).toLocaleDateString(undefined,{day:"numeric",month:"long",year:"numeric"}):"";
   const tp=$("type").value;
-  $("view").innerHTML=v?`<span class="tag ${tp} kicker">${tp} update${d?" · "+d:""}</span>`+render(v):'<div class="empty">'+(canEdit?"Paste an update on the left.<br>The formatted version appears here.":"Open the link you were sent to see an update.")+'</div>'
+  const st=checklistStats(v);
+  const statsHtml=st.total?`<span class="checklist-stats">${st.done}/${st.total} done · ${Math.round(st.done/st.total*100)}%</span>`:"";
+  $("view").innerHTML=v?`<span class="tag ${tp} kicker">${tp} update${d?" · "+d:""}</span>${statsHtml}`+render(v):'<div class="empty">'+(canEdit?"Paste an update on the left.<br>The formatted version appears here.":"Open the link you were sent to see an update.")+'</div>'
 }
 function renderList(){
   const l=$("list");l.innerHTML="";
@@ -436,6 +488,9 @@ $("theme-toggle").onclick = toggleTheme;
 
   // Paste screenshot into editor
   $("src").addEventListener("paste", pasteImage);
+
+  // Checklist toggling in view mode (event delegation survives innerHTML re-renders)
+  $("view").addEventListener("click", handleViewClick);
 
   setStatus("Ready");
   paint();
