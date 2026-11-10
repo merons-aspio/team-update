@@ -137,7 +137,9 @@ function handleViewClick(e) {
   if (!user) return;
   const cb = e.target.closest("input[type=checkbox]");
   if (!cb) return;
-  e.preventDefault();
+  // Note: do NOT call e.preventDefault() here. Chrome toggles the checkbox before
+  // dispatching click, then reverts it (canceled activation) when default is
+  // prevented — which would undo the state we set below.
   const src = $("src");
   const all = Array.from($("view").querySelectorAll("input[type=checkbox]"));
   const idx = all.indexOf(cb);
@@ -154,7 +156,7 @@ function handleViewClick(e) {
     if (it) it.raw = src.value;
   }
   // Instant visual feedback: no full re-render, no flicker/scroll jump
-  cb.checked = !wasChecked;
+  cb.checked = taskLineChecked(lines[li]);
   const cbLi = cb.closest("li");
   if (cbLi) cbLi.classList.toggle("done", cb.checked);
   const st = checklistStats(src.value);
