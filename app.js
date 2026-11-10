@@ -140,7 +140,12 @@ function handleViewClick(e) {
   for (let i = 0; i < lines.length; i++) {
     if (taskRe.test(lines[i])) {
       if (found === idx) {
-        lines[i] = lines[i].replace(/\[xX\]/i, "[ ]").replace(/\[\s*\]/i, "[x]");
+        // Proper state-aware toggle: [x] -> [ ], [ ] -> [x]
+        if (/\[xX\]/i.test(lines[i])) {
+          lines[i] = lines[i].replace(/\[xX\]/i, "[ ]");
+        } else {
+          lines[i] = lines[i].replace(/\[\s*\]/i, "[x]");
+        }
         break;
       }
       found++;
@@ -153,7 +158,9 @@ function handleViewClick(e) {
   }
   touch();
   publish();
+  const scrollTop = document.documentElement.scrollTop || document.body.scrollTop || 0;
   paint();
+  window.scrollTo(0, scrollTop);
 }
 
 // Login button click
