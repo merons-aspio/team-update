@@ -155,10 +155,16 @@ function handleViewClick(e) {
   }
   // Instant visual feedback: no full re-render, no flicker/scroll jump
   cb.checked = !wasChecked;
+  const cbLi = cb.closest("li");
+  if (cbLi) cbLi.classList.toggle("done", cb.checked);
   const st = checklistStats(src.value);
-  const statsEl = $("view").querySelector(".checklist-stats");
-  if (statsEl && st.total) {
-    statsEl.textContent = `${st.done}/${st.total} done · ${Math.round(st.done/st.total*100)}%`;
+  if (st.total) {
+    const pct = Math.round(st.done/st.total*100);
+    const prog = $("view").querySelector(".checklist-progress");
+    const head = prog && prog.querySelector(".cp-head b");
+    if (head) head.textContent = `${st.done} of ${st.total} done · ${pct}%`;
+    const bar = prog && prog.querySelector(".cp-bar i");
+    if (bar) bar.style.width = pct + "%";
   }
   touch();
   schedulePublish();
@@ -321,7 +327,10 @@ function render(raw){
   });
   // Checklist interactivity: logged-in users can toggle checkboxes in view mode
   const boxes=box.querySelectorAll("input[type=checkbox]");
-  boxes.forEach(cb=>{cb.disabled=!user;});
+  boxes.forEach(cb=>{
+    cb.disabled=!user;
+    if(cb.checked){const li=cb.closest("li");if(li)li.classList.add("done");}
+  });
   const frag=document.createElement("div");let sec=null;
   [...box.childNodes].forEach(n=>{
     if(n.nodeType===1&&n.tagName==="H1"){frag.appendChild(n);
@@ -367,13 +376,17 @@ function checklistStats(raw){
   }
   return {total,done};
 }
+function progressHTML(done,total){
+  if(!total)return "";
+  const pct=Math.round(done/total*100);
+  return `<div class="checklist-progress"><div class="cp-head"><span>Checklist progress</span><b>${done} of ${total} done · ${pct}%</b></div><div class="cp-bar"><i style="width:${pct}%"></i></div></div>`;
+}
 function paint(){
   const v=$("src").value.trim(),it=items.find(x=>x.id===cur);
   const d=it&&it.at?new Date(it.at).toLocaleDateString(undefined,{day:"numeric",month:"long",year:"numeric"}):"";
   const tp=$("type").value;
   const st=checklistStats(v);
-  const statsHtml=st.total?`<span class="checklist-stats">${st.done}/${st.total} done · ${Math.round(st.done/st.total*100)}%</span>`:"";
-  $("view").innerHTML=v?`<span class="tag ${tp} kicker">${tp} update${d?" · "+d:""}</span>${statsHtml}`+render(v):'<div class="empty">'+(canEdit?"Paste an update on the left.<br>The formatted version appears here.":"Open the link you were sent to see an update.")+'</div>'
+  $("view").innerHTML=v?`<span class="tag ${tp} kicker">${tp} update${d?" · "+d:""}</span>`+progressHTML(st.done,st.total)+render(v):'<div class="empty">'+(canEdit?"Paste an update on the left.<br>The formatted version appears here.":"Open the link you were sent to see an update.")+'</div>'
 }
 function renderList(){
   const l=$("list");l.innerHTML="";
