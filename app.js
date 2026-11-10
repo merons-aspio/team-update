@@ -124,43 +124,44 @@ async function handleLogout() {
   location.reload();
 }
 
+// Debounced save so rapid checklist clicks don't hammer Supabase
+let publishTimer = null;
+function schedulePublish() {
+  clearTimeout(publishTimer);
+  setStatus("Saving…");
+  publishTimer = setTimeout(() => { publishTimer = null; publish(); }, 400);
+}
+
 // Toggle a checklist item directly in view mode (logged-in users only) and auto-save
 function handleViewClick(e) {
   if (!user) return;
   const cb = e.target.closest("input[type=checkbox]");
   if (!cb) return;
   e.preventDefault();
-  const all = $("view").querySelectorAll("input[type=checkbox]");
-  const idx = Array.from(all).indexOf(cb);
-  if (idx < 0) return;
   const src = $("src");
+  const all = Array.from($("view").querySelectorAll("input[type=checkbox]"));
+  const idx = all.indexOf(cb);
+  if (idx < 0) return;
   const lines = src.value.split("\n");
-  const taskRe = /^\s*[-*+]\s+\[[ xX]?\]\s/;
-  let found = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (taskRe.test(lines[i])) {
-      if (found === idx) {
-        // Proper state-aware toggle: [x] -> [ ], [ ] -> [x]
-        if (/\[xX\]/i.test(lines[i])) {
-          lines[i] = lines[i].replace(/\[xX\]/i, "[ ]");
-        } else {
-          lines[i] = lines[i].replace(/\[\s*\]/i, "[x]");
-        }
-        break;
-      }
-      found++;
-    }
-  }
+  const idxs = taskLineIndexes(src.value);
+  if (idx >= idxs.length) return;
+  const li = idxs[idx];
+  const wasChecked = taskLineChecked(lines[li]);
+  lines[li] = lines[li].replace(/\[[ xX]?\]/, wasChecked ? "[ ]" : "[x]");
   src.value = lines.join("\n");
   if (cur) {
     const it = items.find(x => x.id === cur);
     if (it) it.raw = src.value;
   }
+  // Instant visual feedback: no full re-render, no flicker/scroll jump
+  cb.checked = !wasChecked;
+  const st = checklistStats(src.value);
+  const statsEl = $("view").querySelector(".checklist-stats");
+  if (statsEl && st.total) {
+    statsEl.textContent = `${st.done}/${st.total} done · ${Math.round(st.done/st.total*100)}%`;
+  }
   touch();
-  publish();
-  const scrollTop = document.documentElement.scrollTop || document.body.scrollTop || 0;
-  paint();
-  window.scrollTo(0, scrollTop);
+  schedulePublish();
 }
 
 // Login button click
@@ -339,17 +340,30 @@ function render(raw){
 }
 function titleOf(raw){const f=raw.split("\n").find(l=>l.trim())||"Untitled";return f.replace(/^#+\s*/,"").slice(0,70)}
 
-// Checklist stats: count total and checked tasklist items in raw markdown
+// Tasklist lines in raw markdown. Must mirror what normalize()+marked render:
+// Unicode bullets become "- " bullets, and marked also accepts "*", "+", ordered
+// lists and blockquotes. Fenced code blocks are skipped so indexes stay aligned
+// with the rendered checkboxes.
+const TASK_LINE_RE=/^(\s*(?:>\s*)*(?:[•▸▪◦+\-*]|\d+\.)\s+)\[([ xX]?)\]\s/;
+function taskLineIndexes(raw){
+  const lines=(raw||"").split("\n");
+  const out=[];let inFence=false;
+  for(let i=0;i<lines.length;i++){
+    if(/^\s*```/.test(lines[i])){inFence=!inFence;continue;}
+    if(!inFence&&TASK_LINE_RE.test(lines[i]))out.push(i);
+  }
+  return out;
+}
+function taskLineChecked(line){
+  const m=line.match(TASK_LINE_RE);
+  return !!m&&m[2].toLowerCase()==="x";
+}
 function checklistStats(raw){
   const lines=(raw||"").split("\n");
   let total=0,done=0;
-  const taskRe=/^\s*[-*+]\s+\[[ xX]?\]\s/;
-  const doneRe=/\[xX\]/;
-  for(const line of lines){
-    if(taskRe.test(line)){
-      total++;
-      if(doneRe.test(line)) done++;
-    }
+  for(const i of taskLineIndexes(raw)){
+    total++;
+    if(taskLineChecked(lines[i]))done++;
   }
   return {total,done};
 }
@@ -388,6 +402,7 @@ function touch(){
 function queueSave(){if(canEdit)touch();paint()}
 async function publish() {
   if (!canEdit) return false;
+  if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
   if ($("src").value.trim()) touch();
   
   try {
