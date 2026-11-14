@@ -4,6 +4,9 @@ let cur = null, dirty = false;
 let items = [];
 let pastedImages = {}; // key -> dataUrl map for pasted screenshots
 let imageCounter = 0;
+let expandedEmbeds = new Set(); // keys of HTML previews expanded in this session
+let embedUid = 0;
+let paintTimer = null;
 
 async function loadItems() {
   try {
@@ -226,16 +229,137 @@ function buildHtml(){
   const json=JSON.stringify({updates:items}).replace(/</g,"\\u003c");
   return SRC.replace(/(<script type="application\/json" id="data">)[\s\S]*?(<\/script>)/,(m,a,b)=>a+json+b)
 }
+
+// ---- Embedded HTML previews -------------------------------------------------
+// Fenced ```html / ```htm blocks become collapsible live previews. A complete
+// HTML document pasted as the whole update is shown the same way.
+const HTML_FENCE_RE=/^[ \t]*```(?:html|htm)[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gim;
+
+function isFullHtmlDoc(text){
+  const s=(text||"").replace(/^\uFEFF/,"").trimStart().replace(/^(?:<!--[\s\S]*?-->\s*)+/,"");
+  return /^<!doctype\s+html/i.test(s)||/^<html[\s>]/i.test(s);
+}
+
+function htmlTitle(code){
+  try{
+    const d=new DOMParser().parseFromString(code,"text/html");
+    const t=((d.title||"").trim()||((d.querySelector("h1")||{}).textContent||"").trim()).replace(/\s+/g," ");
+    return t.slice(0,80);
+  }catch(_){return""}
+}
+
+function extractHtmlEmbeds(raw){
+  const embeds=[];
+  const markdown=(raw||"").replace(HTML_FENCE_RE,(m,code)=>{
+    embeds.push(code.replace(/\s+$/,""));
+    return `\n\n<div class="html-embed-slot" data-embed-index="${embeds.length-1}"></div>\n\n`;
+  });
+  return {markdown,embeds};
+}
+
+function embedResizeScript(key){
+  return `<script>(function(){var key=${JSON.stringify(key)};var last=-1;function send(){var b=document.body;if(!b)return;var cs=getComputedStyle(b),r=b.getBoundingClientRect();var h=Math.max(b.scrollHeight,b.offsetHeight,Math.ceil(r.height+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0)));if(Math.abs(h-last)>1){last=h;try{parent.postMessage({type:"tu-embed-height",key:key,height:h},"*")}catch(e){}}}function boot(){send();if(window.ResizeObserver){new ResizeObserver(send).observe(document.body)}else{setInterval(send,1000)}addEventListener("load",send)}if(document.readyState==="loading"){addEventListener("DOMContentLoaded",boot)}else{boot()}})();<\/script>`;
+}
+
+function buildEmbedDocument(code,key){
+  const resize=embedResizeScript(key);
+  if(isFullHtmlDoc(code))return code+resize;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0}body{padding:16px;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1c1b19;background:#fff}img,video,canvas,svg{max-width:100%}table{max-width:100%}</style></head><body>${code}${resize}</body></html>`;
+}
+
+function buildEmbedFrame(embed){
+  const frame=document.createElement("iframe");
+  frame.className="html-embed-iframe";
+  frame.title=embed.title||"HTML preview";
+  frame.setAttribute("sandbox","allow-scripts allow-forms allow-popups");
+  frame.setAttribute("referrerpolicy","no-referrer");
+  frame.dataset.embedKey=embed.key;
+  frame.srcdoc=buildEmbedDocument(embed.code,embed.key);
+  return frame;
+}
+
+function mountHtmlEmbeds(container,embeds){
+  const map=new Map(embeds.map(e=>[e.key,e]));
+  container.querySelectorAll(".html-embed-slot").forEach(slot=>{
+    const embed=map.get(slot.getAttribute("data-embed-key"));
+    if(!embed)return;
+
+    const panel=document.createElement("div");
+    panel.className="html-embed"+(embed.full?" full":"");
+    panel.dataset.embedKey=embed.key;
+
+    const header=document.createElement("button");
+    header.type="button";
+    header.className="html-embed-toggle";
+    header.setAttribute("aria-expanded","false");
+    const chev=document.createElement("span");
+    chev.className="chev";
+    chev.setAttribute("aria-hidden","true");
+    const label=document.createElement("span");
+    label.className="he-label";
+    label.textContent=embed.title||(embed.full?"HTML page":"HTML preview");
+    const badge=document.createElement("span");
+    badge.className="he-badge";
+    badge.textContent="HTML";
+    header.append(chev,label,badge);
+
+    const body=document.createElement("div");
+    body.className="html-embed-body";
+    body.hidden=true;
+    body.id="html-embed-body-"+(++embedUid);
+    header.setAttribute("aria-controls",body.id);
+
+    const setOpen=open=>{
+      if(open){
+        expandedEmbeds.add(embed.key);
+        panel.classList.add("open");
+        header.setAttribute("aria-expanded","true");
+        body.hidden=false;
+        if(!body.firstChild)body.appendChild(buildEmbedFrame(embed));
+      }else{
+        expandedEmbeds.delete(embed.key);
+        panel.classList.remove("open");
+        header.setAttribute("aria-expanded","false");
+        body.hidden=true;
+        body.replaceChildren();
+      }
+    };
+    header.addEventListener("click",()=>setOpen(!panel.classList.contains("open")));
+
+    panel.append(header,body);
+    slot.replaceWith(panel);
+    if(expandedEmbeds.has(embed.key))setOpen(true);
+  });
+}
+
+window.addEventListener("message",e=>{
+  const d=e.data;
+  if(!d||d.type!=="tu-embed-height")return;
+  const frames=document.querySelectorAll("iframe.html-embed-iframe");
+  for(const frame of frames){
+    if(frame.contentWindow!==e.source)continue;
+    const h=Math.max(160,Math.min(20000,Number(d.height)||0));
+    if(h)frame.style.height=h+"px";
+    break;
+  }
+});
+
 const EMO=/^\p{Extended_Pictographic}/u;
 const isBul=l=>/^\s*[•▸▪◦\-\*]\s+/.test(l);
 function normalize(raw){
   let L=raw.replace(/\r/g,"").split("\n").map(l=>l.replace(/\s+$/,""));
-  const out=[];let first=true;
+  const out=[];let first=true,inFence=false;
   const nxt=i=>{for(let j=i+1;j<L.length;j++){if(L[j].trim())return L[j]}return""};
   for(let i=0;i<L.length;i++){
     let l=L[i],t=l.trim();
     if(!t){out.push("");continue}
-    if(/^(#{1,6}\s|---|\||>|!\[|```)/.test(t)||/^\d+\.\s/.test(t)){out.push(l);if(first&&/^#/.test(t))first=false;continue}
+    // Never auto-format inside fenced code blocks.
+    if(inFence){out.push(l);if(/^```/.test(t))inFence=false;continue}
+    if(/^```/.test(t)){out.push(l);inFence=true;continue}
+    // HTML embed placeholders and raw HTML lines must be left exactly as-is.
+    if(/^<div[^>]*data-embed-index=/i.test(t)){out.push(l);continue}
+    if(/^<[a-z!/]/i.test(t)){out.push(l);continue}
+    if(/^(#{1,6}\s|---|\||>|!\[)/.test(t)||/^\d+\.\s/.test(t)){out.push(l);if(first&&/^#/.test(t))first=false;continue}
     if(isBul(t)){
       let b=t.replace(/^([•▸▪◦\-\*]\s*)+/,"");
       b=b.replace(/^([^:*\[\]]{2,40}):\s/,"**$1:** ");
@@ -301,8 +425,26 @@ function loadPastedImages() {
 }
 
 function render(raw){
-  const html=DOMPurify.sanitize(marked.parse(normalize(raw),{breaks:true,gfm:true}));
+  const embeds=[];
+  // A whole pasted HTML document owns the update; no Markdown wrapper around it.
+  if(isFullHtmlDoc(raw.trim())){
+    const code=raw.trim();
+    const embed={key:"html-page",code,title:htmlTitle(code)||"HTML page",full:true};
+    embeds.push(embed);
+    return {html:`<div class="html-embed-slot" data-embed-key="${embed.key}"></div>`,embeds,fullPage:true};
+  }
+  const extracted=extractHtmlEmbeds(raw);
+  extracted.embeds.forEach((code,i)=>{
+    embeds.push({key:"html-"+i,code,title:htmlTitle(code)||"HTML preview",full:false});
+  });
+  const html=DOMPurify.sanitize(marked.parse(normalize(extracted.markdown),{breaks:true,gfm:true}));
   const box=document.createElement("div");box.innerHTML=html;
+  // Attach the stable key each slot needs to restore its expanded/collapsed state.
+  box.querySelectorAll(".html-embed-slot").forEach(slot=>{
+    const i=Number(slot.getAttribute("data-embed-index"));
+    const embed=embeds[i];
+    if(embed)slot.setAttribute("data-embed-key",embed.key);
+  });
   // Replace pasted image placeholder URLs with actual base64 data URLs
   box.querySelectorAll("img").forEach(img=>{
     const src=img.getAttribute("src");
@@ -347,9 +489,19 @@ function render(raw){
   frag.querySelectorAll("p.lead").forEach(()=>{});
   const h1=frag.querySelector("h1");
   if(h1&&h1.nextElementSibling&&h1.nextElementSibling.tagName==="P")h1.nextElementSibling.classList.add("lead");
-  return frag.innerHTML;
+  return {html:frag.innerHTML,embeds,fullPage:false};
 }
-function titleOf(raw){const f=raw.split("\n").find(l=>l.trim())||"Untitled";return f.replace(/^#+\s*/,"").slice(0,70)}
+function titleOf(raw){
+  const t=(raw||"").trim();
+  if(isFullHtmlDoc(t))return htmlTitle(t)||"HTML update";
+  const first=t.split("\n").find(l=>l.trim());
+  if(first&&/^```(?:html|htm)\b/i.test(first.trim())){
+    const ex=extractHtmlEmbeds(t);
+    return htmlTitle(ex.embeds[0]||"")||"HTML update";
+  }
+  const f=raw.split("\n").find(l=>l.trim())||"Untitled";
+  return f.replace(/^#+\s*/,"").slice(0,70);
+}
 
 // Tasklist lines in raw markdown. Must mirror what normalize()+marked render:
 // Unicode bullets become "- " bullets, and marked also accepts "*", "+", ordered
@@ -385,10 +537,17 @@ function progressHTML(done,total){
 }
 function paint(){
   const v=$("src").value.trim(),it=items.find(x=>x.id===cur);
+  if(!v){
+    $("view").innerHTML='<div class="empty">'+(canEdit?"Paste an update on the left.<br>The formatted version appears here.":"Open the link you were sent to see an update.")+'</div>';
+    return;
+  }
   const d=it&&it.at?new Date(it.at).toLocaleDateString(undefined,{day:"numeric",month:"long",year:"numeric"}):"";
   const tp=$("type").value;
   const st=checklistStats(v);
-  $("view").innerHTML=v?`<span class="tag ${tp} kicker">${tp} update${d?" · "+d:""}</span>`+progressHTML(st.done,st.total)+render(v):'<div class="empty">'+(canEdit?"Paste an update on the left.<br>The formatted version appears here.":"Open the link you were sent to see an update.")+'</div>'
+  const out=render(v);
+  const kicker=`<span class="tag ${tp} kicker">${tp} update${d?" · "+d:""}</span>`;
+  $("view").innerHTML=(out.fullPage?"":kicker+progressHTML(st.done,st.total))+out.html;
+  mountHtmlEmbeds($("view"),out.embeds);
 }
 function renderList(){
   const l=$("list");l.innerHTML="";
@@ -401,6 +560,7 @@ function renderList(){
     l.appendChild(b)})
 }
 function open(id){
+  clearTimeout(paintTimer);paintTimer=null;expandedEmbeds.clear();
   cur=id||null;const it=items.find(x=>x.id===id);
   $("src").value=it?it.raw||"":"";$("type").value=it?it.type||"Weekly":"Weekly";$("title").value=it?it.custom||"":"";
   document.body.classList.toggle("hasid",!!it);
@@ -414,7 +574,11 @@ function touch(){
   if(old)Object.assign(old,rec);else items.unshift(rec);
   dirty=true;setStatus("Unpublished changes");renderList();return true
 }
-function queueSave(){if(canEdit)touch();paint()}
+function schedulePaint(){
+  clearTimeout(paintTimer);
+  paintTimer=setTimeout(()=>{paintTimer=null;paint()},160);
+}
+function queueSave(){if(canEdit)touch();schedulePaint()}
 async function publish() {
   if (!canEdit) return false;
   if (publishTimer) { clearTimeout(publishTimer); publishTimer = null; }
