@@ -502,6 +502,16 @@ function titleOf(raw){
   const f=raw.split("\n").find(l=>l.trim())||"Untitled";
   return f.replace(/^#+\s*/,"").slice(0,70);
 }
+// Older saves stored the raw first line as the sidebar title, which for a
+// pasted HTML page is "<!DOCTYPE html>". Show a sensible title instead.
+function displayTitle(it){
+  if(it.custom)return it.custom;
+  const stored=(it.title||"").trim();
+  if(!stored||/^<!doctype\s+html/i.test(stored)||/^<html[\s>]/i.test(stored)||/^```/.test(stored)){
+    return titleOf(it.raw||"")||stored||"Untitled";
+  }
+  return stored;
+}
 
 // Tasklist lines in raw markdown. Must mirror what normalize()+marked render:
 // Unicode bullets become "- " bullets, and marked also accepts "*", "+", ordered
@@ -555,7 +565,7 @@ function renderList(){
   items.forEach(it=>{const b=document.createElement("button");b.className="item"+(cur===it.id?" on":"");
     const d=new Date(it.at).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"});
     b.innerHTML=`<b></b><small><span class="tag ${it.type}">${it.type}</span>${d}</small>`;
-    b.querySelector("b").textContent=it.title;
+    b.querySelector("b").textContent=displayTitle(it);
     b.onclick=()=>{location.hash=it.id;open(it.id)};
     l.appendChild(b)})
 }
