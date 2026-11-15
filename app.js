@@ -5,6 +5,7 @@ let items = [];
 let pastedImages = {}; // key -> dataUrl map for pasted screenshots
 let imageCounter = 0;
 let expandedEmbeds = new Set(); // keys of HTML previews expanded in this session
+let collapsedEmbeds = new Set(); // keys explicitly collapsed while the default is open
 let embedUid = 0;
 let paintTimer = null;
 
@@ -235,6 +236,26 @@ function buildHtml(){
 // HTML document pasted as the whole update is shown the same way.
 const HTML_FENCE_RE=/^[ \t]*```(?:html|htm)[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gim;
 
+// Per-update preference. The marker means every HTML preview in this update
+// opens by default. It lives in the raw text so shared links keep the author's
+// choice without a database change, and it is stripped before render. Detect it
+// anywhere so typing below the marker (or moving it) never loses the setting.
+const EMBED_OPEN_RE=/<!--\s*tu-html-open\s*-->/i;
+const hasEmbedOpen=raw=>EMBED_OPEN_RE.test(raw||"");
+const stripEmbedOpen=raw=>{
+  const src=raw||"";
+  if(!hasEmbedOpen(src))return src;
+  return src
+    .replace(/[ \t]*<!--\s*tu-html-open\s*-->[ \t]*/ig,"")
+    .replace(/[ \t]+\n/g,"\n")
+    .replace(/\n{3,}/g,"\n\n")
+    .replace(/^\n+|\n+$/g,"");
+};
+function setEmbedOpen(raw,open){
+  const base=stripEmbedOpen(raw);
+  return open?(base?base+"\n\n":"")+"<!-- tu-html-open -->":base;
+}
+
 function isFullHtmlDoc(text){
   const s=(text||"").replace(/^\uFEFF/,"").trimStart().replace(/^(?:<!--[\s\S]*?-->\s*)+/,"");
   return /^<!doctype\s+html/i.test(s)||/^<html[\s>]/i.test(s);
@@ -278,7 +299,7 @@ function buildEmbedFrame(embed){
   return frame;
 }
 
-function mountHtmlEmbeds(container,embeds){
+function mountHtmlEmbeds(container,embeds,defaultOpen=false){
   const map=new Map(embeds.map(e=>[e.key,e]));
   container.querySelectorAll(".html-embed-slot").forEach(slot=>{
     const embed=map.get(slot.getAttribute("data-embed-key"));
@@ -312,12 +333,14 @@ function mountHtmlEmbeds(container,embeds){
     const setOpen=open=>{
       if(open){
         expandedEmbeds.add(embed.key);
+        collapsedEmbeds.delete(embed.key);
         panel.classList.add("open");
         header.setAttribute("aria-expanded","true");
         body.hidden=false;
         if(!body.firstChild)body.appendChild(buildEmbedFrame(embed));
       }else{
         expandedEmbeds.delete(embed.key);
+        collapsedEmbeds.add(embed.key);
         panel.classList.remove("open");
         header.setAttribute("aria-expanded","false");
         body.hidden=true;
@@ -328,7 +351,7 @@ function mountHtmlEmbeds(container,embeds){
 
     panel.append(header,body);
     slot.replaceWith(panel);
-    if(expandedEmbeds.has(embed.key))setOpen(true);
+    if(expandedEmbeds.has(embed.key)||(defaultOpen&&!collapsedEmbeds.has(embed.key)))setOpen(true);
   });
 }
 
@@ -492,14 +515,14 @@ function render(raw){
   return {html:frag.innerHTML,embeds,fullPage:false};
 }
 function titleOf(raw){
-  const t=(raw||"").trim();
+  const t=stripEmbedOpen(raw).trim();
   if(isFullHtmlDoc(t))return htmlTitle(t)||"HTML update";
   const first=t.split("\n").find(l=>l.trim());
   if(first&&/^```(?:html|htm)\b/i.test(first.trim())){
     const ex=extractHtmlEmbeds(t);
     return htmlTitle(ex.embeds[0]||"")||"HTML update";
   }
-  const f=raw.split("\n").find(l=>l.trim())||"Untitled";
+  const f=t.split("\n").find(l=>l.trim())||"Untitled";
   return f.replace(/^#+\s*/,"").slice(0,70);
 }
 // Older saves stored the raw first line as the sidebar title, which for a
@@ -546,8 +569,12 @@ function progressHTML(done,total){
   return `<div class="checklist-progress"><div class="cp-head"><span>Checklist progress</span><b>${done} of ${total} done · ${pct}%</b></div><div class="cp-bar"><i style="width:${pct}%"></i></div></div>`;
 }
 function paint(){
-  const v=$("src").value.trim(),it=items.find(x=>x.id===cur);
+  const raw=$("src").value,openByDefault=hasEmbedOpen(raw);
+  const v=stripEmbedOpen(raw).trim(),it=items.find(x=>x.id===cur);
+  const embedRow=$("embed-default-row");
   if(!v){
+    embedRow.hidden=true;
+    $("embed-open").checked=false;
     $("view").innerHTML='<div class="empty">'+(canEdit?"Paste an update on the left.<br>The formatted version appears here.":"Open the link you were sent to see an update.")+'</div>';
     return;
   }
@@ -557,7 +584,10 @@ function paint(){
   const out=render(v);
   const kicker=`<span class="tag ${tp} kicker">${tp} update${d?" · "+d:""}</span>`;
   $("view").innerHTML=(out.fullPage?"":kicker+progressHTML(st.done,st.total))+out.html;
-  mountHtmlEmbeds($("view"),out.embeds);
+  mountHtmlEmbeds($("view"),out.embeds,openByDefault);
+  const hasEmbeds=out.embeds.length>0;
+  embedRow.hidden=!hasEmbeds;
+  $("embed-open").checked=hasEmbeds&&openByDefault;
 }
 function renderList(){
   const l=$("list");l.innerHTML="";
@@ -570,7 +600,7 @@ function renderList(){
     l.appendChild(b)})
 }
 function open(id){
-  clearTimeout(paintTimer);paintTimer=null;expandedEmbeds.clear();
+  clearTimeout(paintTimer);paintTimer=null;expandedEmbeds.clear();collapsedEmbeds.clear();
   cur=id||null;const it=items.find(x=>x.id===id);
   $("src").value=it?it.raw||"":"";$("type").value=it?it.type||"Weekly":"Weekly";$("title").value=it?it.custom||"":"";
   document.body.classList.toggle("hasid",!!it);
@@ -611,6 +641,12 @@ async function publish() {
 }
 ["src","title"].forEach(i=>$(i).addEventListener("input",queueSave));
 $("type").addEventListener("change",queueSave);
+$("embed-open").addEventListener("change",()=>{
+  const open=$("embed-open").checked;
+  $("src").value=setEmbedOpen($("src").value,open);
+  expandedEmbeds.clear();collapsedEmbeds.clear();
+  queueSave();
+});
 $("pub").onclick=publish;
 $("new").onclick=()=>{if(!canEdit)return;history.replaceState(null,"",location.pathname+location.search);open(null);document.body.classList.remove("hasid");$("src").focus()};
 $("copy").onclick = async () => {

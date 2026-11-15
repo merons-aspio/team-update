@@ -89,6 +89,8 @@ Updates can include full interactive HTML pages. They are rendered in an isolate
 
 - **Full page:** paste a complete HTML page (starting with `<!DOCTYPE html>` or `<html>`) as the entire update. The whole update becomes that page and the sidebar title is taken from its `<title>` or `<h1>`.
 - **Collapsed by default:** every preview starts collapsed on shared links and in the editor. Click its header to open it. The iframe is only created when opened, so collapsed previews don't load external scripts or assets.
+- **Open by default:** in the editor, tick **Open HTML previews by default** to make every HTML preview in that update open automatically, including on shared links. The choice is saved inside the update source as a small `<!-- tu-html-open -->` comment; untick it to return to collapsed.
+- **Full-width viewing:** shared links and presentation mode use the full viewport width instead of a narrow centered column.
 - **Sandboxed:** embedded pages can run their own scripts (charts, buttons, animations) but cannot access the app, its login session, or local storage. Use CDN or inline assets; local file references won't work.
 
 ### Authentication
