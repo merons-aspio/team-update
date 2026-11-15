@@ -284,8 +284,14 @@ function embedResizeScript(key){
 
 function buildEmbedDocument(code,key){
   const resize=embedResizeScript(key);
-  if(isFullHtmlDoc(code))return code+resize;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0}body{padding:16px;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1c1b19;background:#fff}img,video,canvas,svg{max-width:100%}table{max-width:100%}</style></head><body>${code}${resize}</body></html>`;
+  // Override any inner container max-width so full-page previews use the full iframe width.
+  const fullWidthOverride="<style>\n    .wrap,.container,.content,.main,.page,.layout,.inner{max-width:none!important;width:100%!important;margin-left:0!important;margin-right:0!important}\n    @media print{.wrap,.container,.content,.main,.page,.layout,.inner{max-width:none!important;width:100%!important}}\n  </style>";
+  if(isFullHtmlDoc(code)){
+    // Inject override CSS into the document head before the closing </head>
+    const injected=code.replace(/<\/head>/i,fullWidthOverride+"</head>");
+    return (injected===code?code+fullWidthOverride:injected)+resize;
+  }
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0}body{padding:16px;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1c1b19;background:#fff}img,video,canvas,svg{max-width:100%}table{max-width:100%}</style>` + fullWidthOverride + `</head><body>` + code + resize + `</body></html>`;
 }
 
 function buildEmbedFrame(embed){
