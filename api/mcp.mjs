@@ -150,7 +150,7 @@ function appBaseUrl(requestInfo) {
     const proto = forwardedProto || (isLocal ? "http" : "https");
     return `${proto}://${host}`;
   } catch (_) {
-    return "https://team-update.vercel.app";
+    return "https://team-update-swart.vercel.app";
   }
 }
 

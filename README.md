@@ -19,8 +19,8 @@ A self-contained, single-page HTML tool for creating and sharing team updates. U
 In your Supabase project dashboard:
 - Go to **Authentication → Settings**
 - Enable **Email** provider
-- Set **Site URL** to your Vercel domain (e.g., `https://team-update.vercel.app`)
-- Add redirect URLs: `https://team-update.vercel.app` and `https://team-update.vercel.app?edit=1`
+- Set **Site URL** to your Vercel domain (e.g., `https://team-update-swart.vercel.app`)
+- Add redirect URLs: `https://team-update-swart.vercel.app` and `https://team-update-swart.vercel.app?edit=1`
 
 ### 2. Create the `updates` table
 
@@ -61,7 +61,7 @@ CREATE POLICY "Authenticated delete" ON updates
 3. Import your `team-update` repository
 4. Click **Deploy** — no build command needed (static HTML)
 
-Your app will be live at `https://team-update.vercel.app` (or your custom domain).
+Your app will be live at `https://team-update-swart.vercel.app` (or your custom domain).
 
 ## Usage
 
@@ -130,7 +130,7 @@ The SQL creates a single-row `mcp_config` table, enables Row Level Security, and
 2. In Vercel, open your project and go to **Settings → Environment Variables**.
 3. Add:
    - `SUPABASE_SERVICE_ROLE_KEY` = the secret key from step 1
-   - `PUBLIC_APP_URL` = your production URL, for example `https://team-update.vercel.app` (optional, used for share links)
+   - `PUBLIC_APP_URL` = your production URL, for example `https://team-update-swart.vercel.app` (optional, used for share links)
    - `SUPABASE_URL` = your project URL (optional; defaults to the project already used by the app)
 4. Select **Production**, **Preview**, and **Development** for the variables.
 5. Redeploy: **Deployments → … → Redeploy**. A new deployment is required before the endpoint can use the variables.
