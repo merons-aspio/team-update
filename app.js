@@ -8,6 +8,9 @@ let expandedEmbeds = new Set(); // keys of HTML previews expanded in this sessio
 let collapsedEmbeds = new Set(); // keys explicitly collapsed while the default is open
 let embedUid = 0;
 let paintTimer = null;
+let mcpToken = null;
+let mcpRegenArmed = false;
+let mcpRegenTimer = null;
 
 async function loadItems() {
   try {
@@ -75,6 +78,8 @@ function updateAuthUI() {
       editorEl.classList.add("viewer");
       $("exit").style.display = "none";
     }
+    mcpToken = null;
+    if ($("mcp-overlay") && $("mcp-overlay").classList.contains("open")) closeMcp();
   }
 }
 
@@ -705,7 +710,11 @@ $("del").onclick = async () => {
 const pres=()=>{document.body.classList.add("present");try{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()}catch(e){}};
 $("present").onclick=pres;$("present2").onclick=pres;
 $("exit").onclick=()=>{document.body.classList.remove("present");try{document.fullscreenElement&&document.exitFullscreen()}catch(e){}};
-document.addEventListener("keydown",e=>{if(e.key==="Escape")document.body.classList.remove("present")});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape")return;
+  if($("mcp-overlay").classList.contains("open")){closeMcp();return}
+  document.body.classList.remove("present");
+});
 window.addEventListener("hashchange",()=>{const h=hashId();if(h&&h!==cur&&items.find(x=>x.id===h))open(h)});
 
 // Theme toggle (persists in localStorage)
@@ -729,6 +738,200 @@ applyTheme(currentTheme);
 
 // Toggle button click
 $("theme-toggle").onclick = toggleTheme;
+
+// ---- MCP helper ------------------------------------------------------------
+function mcpEndpoint(token){
+  return location.origin+"/api/mcp?key="+encodeURIComponent(token);
+}
+
+function mcpClaudeConfig(url){
+  return JSON.stringify({
+    mcpServers:{
+      "team-updates":{
+        command:"npx",
+        args:["-y","mcp-remote",url]
+      }
+    }
+  },null,2);
+}
+
+function mcpSetStatus(message,kind){
+  const el=$("mcp-status");
+  el.hidden=!message;
+  el.textContent=message||"";
+  el.className="mcp-status"+(kind?" "+kind:"");
+}
+
+function mcpSetError(message){
+  const el=$("mcp-error");
+  el.hidden=!message;
+  el.textContent=message||"";
+}
+
+function renderMcpToken(){
+  const url=mcpToken?mcpEndpoint(mcpToken):"";
+  $("mcp-url").value=url;
+  $("mcp-claude-config").textContent=url?mcpClaudeConfig(url):"The secret URL is not available yet.";
+  ["mcp-copy","mcp-test","mcp-copy-claude","mcp-regen"].forEach(id=>{
+    const btn=$(id);
+    if(btn)btn.disabled=!url;
+  });
+}
+
+async function ensureMcpToken(force){
+  if(!canEdit)throw new Error("Sign in to manage the MCP secret.");
+  if(mcpToken&&!force)return mcpToken;
+
+  const {data,error}=await sb.from("mcp_config").select("token").eq("id",1).maybeSingle();
+  if(error){
+    throw new Error("Could not load the MCP secret. Run supabase/mcp.sql in the Supabase SQL Editor, then reopen this dialog.\n\n"+error.message);
+  }
+  if(!data||!data.token){
+    throw new Error("MCP is not configured yet. Run supabase/mcp.sql in the Supabase SQL Editor, then reopen this dialog.");
+  }
+  mcpToken=String(data.token);
+  renderMcpToken();
+  return mcpToken;
+}
+
+async function openMcp(){
+  mcpSetStatus("","");
+  mcpSetError("");
+  renderMcpToken();
+  $("mcp-overlay").classList.add("open");
+  $("mcp-overlay").setAttribute("aria-hidden","false");
+  document.body.classList.add("mcp-open");
+  $("mcp-close").focus();
+
+  if(!mcpToken){
+    mcpSetStatus("Loading secret…","busy");
+    try{
+      await ensureMcpToken(false);
+      mcpSetStatus("","");
+    }catch(e){
+      mcpSetStatus("","");
+      mcpSetError(e.message||String(e));
+    }
+  }
+}
+
+function closeMcp(){
+  $("mcp-overlay").classList.remove("open");
+  $("mcp-overlay").setAttribute("aria-hidden","true");
+  document.body.classList.remove("mcp-open");
+  mcpRegenArmed=false;
+  clearTimeout(mcpRegenTimer);
+  $("mcp-regen").textContent="Regenerate secret";
+}
+
+async function copyText(text,successMessage){
+  if(!text)return;
+  try{
+    await navigator.clipboard.writeText(text);
+    setStatus(successMessage);
+    mcpSetStatus(successMessage,"ok");
+  }catch(_){
+    mcpSetStatus("Copy failed. Select the text and copy it manually.","error");
+  }
+}
+
+async function testMcpConnection(){
+  let token;
+  try{
+    token=await ensureMcpToken(false);
+  }catch(e){
+    mcpSetError(e.message||String(e));
+    return;
+  }
+
+  mcpSetError("");
+  mcpSetStatus("Connecting…","busy");
+  try{
+    const response=await fetch(mcpEndpoint(token),{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Accept":"application/json, text/event-stream"
+      },
+      body:JSON.stringify({
+        jsonrpc:"2.0",
+        id:1,
+        method:"initialize",
+        params:{
+          protocolVersion:"2025-06-18",
+          capabilities:{},
+          clientInfo:{name:"team-updates-web",version:"1.0.0"}
+        }
+      })
+    });
+    const text=await response.text();
+    if(!response.ok){
+      mcpSetStatus("Connection failed ("+response.status+"). "+(text?text.slice(0,240):""),"error");
+      return;
+    }
+    let body=null;
+    try{
+      const trimmed=text.trim();
+      if(trimmed.startsWith("{")){
+        body=JSON.parse(trimmed);
+      }else{
+        const dataLine=trimmed.split(/\r?\n/).find(line=>line.startsWith("data:"));
+        if(dataLine)body=JSON.parse(dataLine.slice(5).trim());
+      }
+    }catch(_){}
+    const name=(body&&body.result&&body.result.serverInfo&&body.result.serverInfo.name)||"MCP server";
+    mcpSetStatus("Connected to "+name+" ✓","ok");
+  }catch(e){
+    mcpSetStatus("Connection failed: "+(e.message||e),"error");
+  }
+}
+
+async function regenerateMcpSecret(){
+  if(!mcpRegenArmed){
+    mcpRegenArmed=true;
+    $("mcp-regen").textContent="Click again to regenerate";
+    clearTimeout(mcpRegenTimer);
+    mcpRegenTimer=setTimeout(()=>{
+      mcpRegenArmed=false;
+      $("mcp-regen").textContent="Regenerate secret";
+    },4000);
+    return;
+  }
+
+  mcpRegenArmed=false;
+  clearTimeout(mcpRegenTimer);
+  $("mcp-regen").textContent="Regenerate secret";
+  mcpSetError("");
+  mcpSetStatus("Regenerating…","busy");
+
+  try{
+    const token=crypto.randomUUID();
+    const {data,error}=await sb
+      .from("mcp_config")
+      .update({token,updated_at:new Date().toISOString()})
+      .eq("id",1)
+      .select("id")
+      .maybeSingle();
+    if(error)throw error;
+    if(!data)throw new Error("No MCP config row was updated. Run supabase/mcp.sql again.");
+    mcpToken=token;
+    renderMcpToken();
+    mcpSetStatus("Secret regenerated. The old URL no longer works.","ok");
+  }catch(e){
+    mcpSetStatus("","");
+    mcpSetError(e.message||String(e));
+  }
+}
+
+$("mcp-btn").onclick=openMcp;
+$("mcp-close").onclick=closeMcp;
+$("mcp-overlay").addEventListener("click",e=>{
+  if(e.target===$("mcp-overlay"))closeMcp();
+});
+$("mcp-copy").onclick=()=>copyText($("mcp-url").value,"Secret URL copied ✓");
+$("mcp-copy-claude").onclick=()=>copyText($("mcp-claude-config").textContent,"Claude config copied ✓");
+$("mcp-test").onclick=testMcpConnection;
+$("mcp-regen").onclick=regenerateMcpSecret;
 
 (async () => {
   renderAuthForm();

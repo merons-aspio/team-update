@@ -19,6 +19,60 @@
     <button id="auth-btn">Sign in</button>
   </div>
 </div>
+<div id="mcp-overlay" aria-hidden="true">
+  <div id="mcp-box" role="dialog" aria-modal="true" aria-labelledby="mcp-title">
+    <button id="mcp-close" class="mcp-close" title="Close" aria-label="Close">×</button>
+    <h2 id="mcp-title">Connect Claude or ChatGPT</h2>
+    <p class="hint mcp-intro">Paste this secret URL into a custom MCP connector. Treat it like a password: anyone who has it can read, create, and edit updates.</p>
+
+    <label class="mcp-label" for="mcp-url">Secret MCP URL</label>
+    <div class="mcp-url-row">
+      <input id="mcp-url" readonly placeholder="Loading…">
+      <button class="btn" id="mcp-copy">Copy</button>
+    </div>
+
+    <div class="mcp-actions">
+      <button class="btn" id="mcp-test">Test connection</button>
+      <button class="btn" id="mcp-regen">Regenerate secret</button>
+    </div>
+    <div id="mcp-status" class="mcp-status" hidden></div>
+    <div id="mcp-error" class="mcp-error" hidden></div>
+
+    <details class="mcp-client" open>
+      <summary>Claude Desktop</summary>
+      <ol>
+        <li>Open <b>Settings → Connectors → Add custom connector</b>.</li>
+        <li>Name it <b>Team Updates</b>, paste the secret URL above, and choose no authentication.</li>
+        <li>If custom connectors are not available on your plan, use the configuration below with <code>mcp-remote</code>.</li>
+      </ol>
+      <pre id="mcp-claude-config"></pre>
+      <button class="btn mcp-small" id="mcp-copy-claude">Copy Claude config</button>
+    </details>
+
+    <details class="mcp-client">
+      <summary>ChatGPT</summary>
+      <ol>
+        <li>Open <b>Settings → Connectors → Advanced</b> and enable <b>Developer mode</b>.</li>
+        <li>Create a custom connector and paste the secret URL above.</li>
+        <li>Choose <b>No authentication</b>. The secret is already part of the URL.</li>
+      </ol>
+      <p class="hint">Menu names can change. Look for custom connectors or developer mode in ChatGPT settings.</p>
+    </details>
+
+    <details class="mcp-client">
+      <summary>Available tools</summary>
+      <ul class="mcp-tools">
+        <li><code>list_team_updates</code> — list published updates</li>
+        <li><code>get_team_update</code> — read one update's full source</li>
+        <li><code>create_team_update</code> — publish a new update</li>
+        <li><code>update_team_update</code> — edit an existing update</li>
+      </ul>
+      <p class="hint">Delete is intentionally not exposed to AI clients.</p>
+    </details>
+
+    <div class="mcp-warn">Regenerating the secret immediately invalidates the old URL. Any Claude or ChatGPT connector using it will stop working until you paste the new URL.</div>
+  </div>
+</div>
 <button class="btn exit" id="exit">Exit presentation</button>
 <div class="app">
 <aside>
@@ -37,6 +91,7 @@
     <button class="btn ed" id="del">Delete</button>
     <button class="btn ed" id="present">Present</button>
     <button class="btn ed" id="copy">Copy link</button>
+    <button class="btn ed" id="mcp-btn" title="Connect Claude Desktop or ChatGPT">MCP</button>
     <button class="btn pri ed" id="pub">Publish</button>
   </div>
   <div class="linkrow ed" id="linkrow" hidden><input id="linkbox" readonly><span class="hint">Link copied. Anyone with this link can open the update. Click Publish after edits and their page refreshes by itself.</span></div>

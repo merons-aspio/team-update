@@ -1,0 +1,19 @@
+{
+  "name": "team-updates",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Team Updates app with a remote MCP helper for Claude Desktop and ChatGPT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "check": "node --check api/mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@supabase/supabase-js": "^2.119.2",
+    "zod": "^4.6.7"
+  }
+}
